@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build outputs (we build in Docker)
+dist/
+*/dist/
+
+# Development files
+*.log
+*.tmp
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+e2e/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+coverage/
+
+# Documentation (not needed in image)
+*.md
+!README.md
+docs/
+
+# Git
+.git/
+.gitignore
+
+# Portable version files
+portable-launcher.ps1
+build-portable.ps1
+setup.ps1
+setup.sh
+
+# Old/backup files
+*.old
+*.bak
+*.orig
+
+# Local data directories
+backend/appdata/
+data/

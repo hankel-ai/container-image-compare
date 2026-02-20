@@ -1,0 +1,18 @@
+apiVersion: v2
+name: container-image-compare
+description: A Helm chart for Container Image Compare - a web application for comparing container images
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - container
+  - docker
+  - image
+  - compare
+  - diff
+  - registry
+maintainers:
+  - name: Container Image Compare
+home: https://github.com/your-org/container-image-compare
+sources:
+  - https://github.com/your-org/container-image-compare

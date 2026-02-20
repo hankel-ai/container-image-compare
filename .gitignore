@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+
+# Cache and temp files
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kubernetes config
+.kube/
+
+# Application data (consolidated in appdata/)
+appdata/
+data/
+cache/
+backend/.cache/
+backend/cache/
+backend/data/
+*.db
+*.sqlite
+
+# E2E test artifacts
+e2e/*.png
+e2e/screenshots/*.png
+e2e/*.html
+e2e/*.json
+e2e/*.log
+
+# Processing log (optional - remove if you want to track it)
+PROCESSING.md
