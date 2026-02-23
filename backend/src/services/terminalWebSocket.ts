@@ -20,6 +20,7 @@
 import { WebSocketServer, WebSocket, RawData } from 'ws';
 import type { IncomingMessage } from 'http';
 import { Server } from 'http';
+import { execSync } from 'child_process';
 import { containerTerminalService } from '../services/containerTerminal';
 import { createLogger } from '../utils/logger';
 import * as pty from 'node-pty';
@@ -29,6 +30,7 @@ const logger = createLogger('ContainerTerminalWebSocket');
 // Track active WebSocket connections and their PTY processes
 const activeConnections = new Map<string, WebSocket>();
 const activePtys = new Map<string, pty.IPty>();
+const connectionAlive = new Map<string, boolean>();
 
 /**
  * Setup WebSocket server for container terminal connections
@@ -67,6 +69,31 @@ export function setupTerminalWebSocket(server: Server): WebSocketServer {
 }
 
 /**
+ * Wait for a container to be in the 'running' state.
+ * Polls up to maxRetries times with a delay between each attempt.
+ */
+async function waitForContainerReady(containerName: string, cmd: string, maxRetries: number = 5, delayMs: number = 500): Promise<boolean> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const status = execSync(`${cmd} inspect -f "{{.State.Status}}" ${containerName}`, {
+        encoding: 'utf-8',
+        timeout: 5000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      if (status === 'running') {
+        logger.info(`Container ${containerName} is ready (attempt ${i + 1})`);
+        return true;
+      }
+      logger.debug(`Container ${containerName} status: ${status}, waiting...`);
+    } catch (err: any) {
+      logger.debug(`Container readiness check failed: ${err.message}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  return false;
+}
+
+/**
  * Handle a terminal WebSocket connection using node-pty for real TTY support
  */
 async function handleTerminalConnection(ws: WebSocket, sessionId: string): Promise<void> {
@@ -86,8 +113,13 @@ async function handleTerminalConnection(ws: WebSocket, sessionId: string): Promi
     return;
   }
 
-  // Store the connection
+  // Store the connection and mark alive for ping/pong
   activeConnections.set(sessionId, ws);
+  connectionAlive.set(sessionId, true);
+
+  ws.on('pong', () => {
+    connectionAlive.set(sessionId, true);
+  });
 
   // Get the container runtime and container name
   const runtime = containerTerminalService.getRuntime();
@@ -97,6 +129,17 @@ async function handleTerminalConnection(ws: WebSocket, sessionId: string): Promi
   const containerName = `cic-terminal-${sessionId.slice(0, 8)}`;
 
   logger.info(`Attaching to container ${containerName} with node-pty for real TTY`);
+
+  // Wait for container to be ready before exec
+  const isReady = await waitForContainerReady(containerName, cmd);
+  if (!isReady) {
+    logger.error(`Container ${containerName} not ready after polling`);
+    ws.send(JSON.stringify({ type: 'error', message: 'Container failed to start in time' }));
+    ws.close(4003, 'Container not ready');
+    activeConnections.delete(sessionId);
+    connectionAlive.delete(sessionId);
+    return;
+  }
 
   // Use node-pty to create a real pseudo-terminal
   // This gives us proper TTY support so -it flags work correctly
@@ -108,13 +151,24 @@ async function handleTerminalConnection(ws: WebSocket, sessionId: string): Promi
     containerName,
     '/bin/sh'
   ];
-  const ptyProcess = pty.spawn(cmd, execArgs, {
-    name: 'xterm-256color',
-    cols: 80,
-    rows: 24,
-    cwd: process.cwd(),
-    env: process.env as { [key: string]: string }
-  });
+
+  let ptyProcess: pty.IPty;
+  try {
+    ptyProcess = pty.spawn(cmd, execArgs, {
+      name: 'xterm-256color',
+      cols: 80,
+      rows: 24,
+      cwd: process.cwd(),
+      env: process.env as { [key: string]: string }
+    });
+  } catch (err: any) {
+    logger.error(`Failed to spawn PTY for session ${sessionId}: ${err.message}`);
+    ws.send(JSON.stringify({ type: 'error', message: `Failed to start terminal: ${err.message}` }));
+    ws.close(4002, 'PTY spawn failed');
+    activeConnections.delete(sessionId);
+    connectionAlive.delete(sessionId);
+    return;
+  }
 
   activePtys.set(sessionId, ptyProcess);
   logger.info(`Started PTY exec process for session ${sessionId} (PID: ${ptyProcess.pid})`);
@@ -210,17 +264,31 @@ async function handleTerminalConnection(ws: WebSocket, sessionId: string): Promi
     logger.error(`WebSocket error for session ${sessionId}`, { error: error.message });
   });
 
-  // Setup heartbeat to detect stale connections
+  // Setup heartbeat with WebSocket-level ping/pong to detect half-open connections
   const heartbeatInterval = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
-    } else {
+    if (ws.readyState !== WebSocket.OPEN) {
       clearInterval(heartbeatInterval);
+      return;
     }
+
+    // Check if previous ping was answered
+    if (connectionAlive.get(sessionId) === false) {
+      logger.warn(`Connection dead for session ${sessionId}, terminating`);
+      clearInterval(heartbeatInterval);
+      ws.terminate();
+      return;
+    }
+
+    // Mark as not alive, then ping — pong handler will mark alive again
+    connectionAlive.set(sessionId, false);
+    ws.ping();
+    // Also send JSON heartbeat for application-level keep-alive
+    ws.send(JSON.stringify({ type: 'heartbeat', timestamp: Date.now() }));
   }, 30000);
 
   ws.on('close', () => {
     clearInterval(heartbeatInterval);
+    connectionAlive.delete(sessionId);
   });
 }
 
@@ -250,4 +318,5 @@ export function closeAllTerminalConnections(): void {
   }
   
   activeConnections.clear();
+  connectionAlive.clear();
 }

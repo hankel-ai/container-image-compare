@@ -36,10 +36,10 @@ docker compose -f docker/docker-compose.yml up --build -d
 Location: `e2e/`
 
 **Mandatory testing protocol** — test before AND after code changes:
-1. Start Docker containers (`docker compose up -d --build`)
+1. Start Docker containers (`docker compose -f docker/docker-compose.yml up -d --build`)
 2. Run a Puppeteer test: `cd e2e && node test-file.js`
 3. Make code changes
-4. Rebuild: `docker compose down && docker compose up -d --build`
+4. Rebuild: `docker compose -f docker/docker-compose.yml down && docker compose -f docker/docker-compose.yml up -d --build`
 5. Re-run the same test; compare before/after screenshots
 
 Test conventions:
@@ -49,6 +49,7 @@ Test conventions:
 - Take screenshots to `e2e/screenshots/` named `{test-name}-{step}-{timestamp}.png`
 - Use `page.evaluate()` for button clicks; use `setTimeout` promises for delays (not `page.waitForTimeout`)
 - UI: single image shows "INSPECT IMAGE" button; two images shows "COMPARE IMAGES"
+- Terminal: TERMINAL button opens in a **new browser tab** — use `browser.once('targetcreated', target => ...)` to capture the new page in Puppeteer
 - Remind user to clean up `e2e/screenshots/` before ending sessions
 
 ## Architecture
@@ -71,10 +72,10 @@ Local FS: cache/ (image layers, LRU eviction), data/ (settings, history, encrypt
 - `comparison.ts` — Generates metadata & filesystem diffs between images
 - `containerTerminal.ts` — Interactive container sessions via Podman
 - `terminalWebSocket.ts` — WebSocket handler for terminal I/O (uses node-pty)
-- `history.ts` / `settings.ts` / `credentials.ts` — Persistence services
+- `history.ts` / `settings.ts` — Persistence services (settings includes credential management)
 
 ### Frontend Structure (`frontend/src/`)
-- **Pages:** `pages/` — HomePage, ComparisonPage, HistoryPage, SettingsPage
+- **Pages:** `pages/` — HomePage, ComparisonPage, HistoryPage, SettingsPage, TerminalPage (opens in new browser tab)
 - **Components:** `components/` — FilesystemView, FileContentDiff, FileTree, MetadataView, ContainerTerminal, etc.
 - **State:** `store/` — Zustand stores (comparison, containerTerminal, settings)
 

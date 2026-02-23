@@ -66,6 +66,14 @@ export default function TerminalPage() {
     clearPendingDirectoryChange
   } = useContainerTerminalStore();
 
+  const currentSessionRef = useRef(currentSession);
+  const [terminalReady, setTerminalReady] = useState(false);
+
+  // Keep currentSessionRef in sync with currentSession
+  useEffect(() => {
+    currentSessionRef.current = currentSession;
+  }, [currentSession]);
+
   // Set document title
   useEffect(() => {
     if (imageRef) {
@@ -156,6 +164,7 @@ export default function TerminalPage() {
       });
 
       terminalInstance.current = terminal;
+      setTerminalReady(true);
       return true;
     };
 
@@ -196,6 +205,7 @@ export default function TerminalPage() {
         terminalInstance.current.dispose();
         terminalInstance.current = null;
       }
+      setTerminalReady(false);
     };
   }, []);
 
@@ -233,9 +243,9 @@ export default function TerminalPage() {
     };
   }, [imageRef, runtimeInfo?.available]);
 
-  // Connect WebSocket when session is ready
+  // Connect WebSocket when session is ready and terminal is initialized
   useEffect(() => {
-    if (!currentSession || currentSession.status !== 'running' || !terminalInstance.current) {
+    if (!currentSession || currentSession.status !== 'running' || !terminalReady) {
       return;
     }
 
@@ -247,7 +257,7 @@ export default function TerminalPage() {
         wsRef.current = null;
       }
     };
-  }, [currentSession?.sessionId, currentSession?.status]);
+  }, [currentSession?.sessionId, currentSession?.status, terminalReady]);
 
   // Handle pending directory change from other tabs
   useEffect(() => {
@@ -305,7 +315,8 @@ export default function TerminalPage() {
   }, []);
 
   const connectWebSocket = useCallback(() => {
-    if (!currentSession || wsRef.current) return;
+    const session = currentSessionRef.current;
+    if (!session || wsRef.current) return;
 
     const terminal = terminalInstance.current;
     if (!terminal) return;
@@ -314,7 +325,7 @@ export default function TerminalPage() {
     setStatusMessage('Connecting to container...');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/terminal?sessionId=${currentSession.sessionId}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/terminal?sessionId=${session.sessionId}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -371,10 +382,9 @@ export default function TerminalPage() {
 
     ws.onclose = (event) => {
       wsRef.current = null;
-      if (event.code !== 1000 && reconnectAttempts.current < 3) {
-        reconnectAttempts.current++;
-        setStatusMessage(`Reconnecting (${reconnectAttempts.current}/3)...`);
-        setTimeout(connectWebSocket, 2000);
+      if (event.code !== 1000) {
+        setConnectionStatus('disconnected');
+        setStatusMessage('Connection lost. Click Reconnect to start a new session.');
       } else {
         setConnectionStatus('disconnected');
         setStatusMessage('Disconnected');
@@ -388,7 +398,7 @@ export default function TerminalPage() {
     });
 
     return () => inputHandler.dispose();
-  }, [currentSession, imageRef, initialWorkingDir]);
+  }, [imageRef, initialWorkingDir]);
 
   const handleReconnect = useCallback(async () => {
     if (wsRef.current) {

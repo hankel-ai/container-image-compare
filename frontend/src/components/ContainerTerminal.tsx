@@ -57,6 +57,14 @@ export default function ContainerTerminal({
     terminateSession
   } = useContainerTerminalStore();
 
+  const currentSessionRef = useRef(currentSession);
+  const [terminalReady, setTerminalReady] = useState(false);
+
+  // Keep currentSessionRef in sync with currentSession
+  useEffect(() => {
+    currentSessionRef.current = currentSession;
+  }, [currentSession]);
+
   // Initialize terminal - wait for container to have valid dimensions
   useEffect(() => {
     // Check if the DOM element changed (React re-render)
@@ -134,6 +142,7 @@ export default function ContainerTerminal({
       });
 
       terminalInstance.current = terminal;
+      setTerminalReady(true);
       return true;
     };
 
@@ -180,6 +189,7 @@ export default function ContainerTerminal({
         terminalInstance.current = null;
       }
       attachedElement.current = null;
+      setTerminalReady(false);
     };
   }, []);
 
@@ -214,9 +224,9 @@ export default function ContainerTerminal({
     };
   }, [imageRef, workingDir, runtimeInfo?.available]);
 
-  // Connect WebSocket when session is ready
+  // Connect WebSocket when session is ready and terminal is initialized
   useEffect(() => {
-    if (!currentSession || currentSession.status !== 'running' || !terminalInstance.current) {
+    if (!currentSession || currentSession.status !== 'running' || !terminalReady) {
       return;
     }
 
@@ -228,11 +238,12 @@ export default function ContainerTerminal({
         wsRef.current = null;
       }
     };
-  }, [currentSession?.sessionId, currentSession?.status]);
+  }, [currentSession?.sessionId, currentSession?.status, terminalReady]);
 
   // Connect to WebSocket
   const connectWebSocket = useCallback(() => {
-    if (!currentSession || wsRef.current) {
+    const session = currentSessionRef.current;
+    if (!session || wsRef.current) {
       return;
     }
 
@@ -246,7 +257,7 @@ export default function ContainerTerminal({
 
     // Construct WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/terminal?sessionId=${currentSession.sessionId}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/terminal?sessionId=${session.sessionId}`;
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -312,10 +323,9 @@ export default function ContainerTerminal({
     ws.onclose = (event) => {
       wsRef.current = null;
 
-      if (event.code !== 1000 && reconnectAttempts.current < 3) {
-        reconnectAttempts.current++;
-        setStatusMessage(`Reconnecting (${reconnectAttempts.current}/3)...`);
-        setTimeout(connectWebSocket, 2000);
+      if (event.code !== 1000) {
+        setConnectionStatus('disconnected');
+        setStatusMessage('Connection lost. Click Reconnect to start a new session.');
       } else {
         setConnectionStatus('disconnected');
         setStatusMessage('Disconnected');
@@ -332,7 +342,7 @@ export default function ContainerTerminal({
     return () => {
       inputHandler.dispose();
     };
-  }, [currentSession, imageRef, workingDir]);
+  }, [imageRef, workingDir]);
 
   // Handle reconnect - create a fresh session
   const handleReconnect = useCallback(async () => {

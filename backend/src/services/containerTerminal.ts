@@ -265,47 +265,49 @@ class ContainerTerminalService extends EventEmitter {
     logger.info(`Creating container session ${sessionId} for image ${imageRef}`);
 
     try {
+      // Resolve which image tag to use for starting the container
+      let imageTag = imageRef;
+
       // Check if image was pre-prepared by background process
       const prepared = this.preparedImages.get(imageRef);
       if (prepared) {
         logger.info(`Using pre-prepared image ${prepared.localTag} for ${imageRef}`);
-        // Skip loadImage, use the pre-prepared image tag directly
-        (this as any)._lastImageTag = prepared.localTag;
+        imageTag = prepared.localTag;
       } else if (usePodmanPull) {
         // Layer data not available in cache - check if image already exists in podman/docker
         // First check by the local tag (cic-terminal/<cacheFolderId>:latest)
         const localTag = cacheFolderName ? `cic-terminal/${cacheFolderName}:latest` : null;
-        
+
         let imageFound = false;
         if (localTag) {
           imageFound = await this.checkImageExists(localTag);
           if (imageFound) {
             logger.info(`Image found as ${localTag} in ${this.runtime.type}, using it directly`);
-            (this as any)._lastImageTag = localTag;
+            imageTag = localTag;
           }
         }
-        
+
         // Also check by original image ref
         if (!imageFound) {
           imageFound = await this.checkImageExists(imageRef);
           if (imageFound) {
             logger.info(`Image found as ${imageRef} in ${this.runtime.type}, using it directly`);
-            (this as any)._lastImageTag = imageRef;
+            imageTag = imageRef;
           }
         }
-        
+
         if (!imageFound) {
           // Fall back to direct podman/docker pull
           logger.info(`Image not found in ${this.runtime.type}, pulling: ${imageRef}`);
-          await this.pullImageDirectly(imageRef);
+          imageTag = await this.pullImageDirectly(imageRef);
         }
       } else {
         // Load the image into Docker/Podman the traditional way
-        await this.loadImage(tarPath, imageRef);
+        imageTag = await this.loadImage(tarPath, imageRef);
       }
 
       // Create and start the container
-      const containerId = await this.startContainer(imageRef, workingDir, sessionId);
+      const containerId = await this.startContainer(imageTag, workingDir, sessionId);
       
       session.containerId = containerId;
       session.status = 'running';
@@ -353,7 +355,7 @@ class ContainerTerminalService extends EventEmitter {
    * Pull an image directly using podman/docker
    * Used as a fallback when the layer data isn't available in cache
    */
-  private async pullImageDirectly(imageRef: string): Promise<void> {
+  private async pullImageDirectly(imageRef: string): Promise<string> {
     const cmd = this.runtime.type === 'docker' ? 'docker' : 'podman';
     
     logger.info(`Pulling image with ${cmd} pull ${imageRef}`);
@@ -376,9 +378,7 @@ class ContainerTerminalService extends EventEmitter {
         clearTimeout(timeout);
         if (code === 0) {
           logger.info(`Successfully pulled image ${imageRef}`);
-          // Store the imageRef as the tag to use
-          (this as any)._lastImageTag = imageRef;
-          resolve();
+          resolve(imageRef);
         } else {
           reject(new Error(`Failed to pull image: ${stderr}`));
         }
@@ -403,14 +403,14 @@ class ContainerTerminalService extends EventEmitter {
    * The result is exactly equivalent to `docker run -it <image>`.
    * ============================================================================
    */
-  private async loadImage(dockerImageTarPath: string, imageRef: string): Promise<void> {
+  private async loadImage(dockerImageTarPath: string, imageRef: string): Promise<string> {
     const cmd = this.runtime.type === 'docker' ? 'docker' : 'podman';
-    
+
     // Parse image ref to create a clean local tag
     const imageName = imageRef.replace(/[^a-zA-Z0-9._\/-]/g, '_').toLowerCase();
     const localTag = `cic-terminal/${imageName}:latest`;
-    
-    return new Promise(async (resolve, reject) => {
+
+    return new Promise<string>(async (resolve, reject) => {
       logger.debug(`Loading Docker image from ${dockerImageTarPath}`);
       
       // Always remove the old image and reload fresh to ensure proper format
@@ -507,8 +507,7 @@ class ContainerTerminalService extends EventEmitter {
         }
 
         logger.info(`Image loaded successfully as ${loadedTag}`);
-        (this as any)._lastImageTag = loadedTag;
-        
+
         // Verify image is valid by inspecting it
         try {
           const inspectOutput = execSync(`${cmd} image inspect ${loadedTag} --format "{{.Config.Cmd}} {{.Config.Entrypoint}} {{.RootFS.Layers}}"`, {
@@ -532,7 +531,7 @@ class ContainerTerminalService extends EventEmitter {
           logger.warn(`Image inspect failed: ${inspectErr.message}`);
         }
         
-        resolve();
+        resolve(loadedTag || localTag);
       } catch (loadErr: any) {
         logger.error(`Failed to load image: ${loadErr.message}`);
         reject(new Error(`Failed to load image into ${cmd}: ${loadErr.message}`));
@@ -552,12 +551,11 @@ class ContainerTerminalService extends EventEmitter {
    * ============================================================================
    */
   private async startContainer(
-    imageRef: string,
+    imageTag: string,
     workingDir: string | undefined,
     sessionId: string
   ): Promise<string> {
     const cmd = this.runtime.type === 'docker' ? 'docker' : 'podman';
-    const imageTag = (this as any)._lastImageTag || imageRef;
     
     // Generate a unique container name
     const containerName = `cic-terminal-${sessionId.slice(0, 8)}`;
@@ -710,21 +708,6 @@ class ContainerTerminalService extends EventEmitter {
         } catch {
           // Ignore errors
         }
-      }
-    }
-
-    // Clean up imported image
-    const importTag = (this as any)._lastImportTag;
-    if (importTag) {
-      const cmd = session.runtime === 'docker' ? 'docker' : 'podman';
-      try {
-        execSync(`${cmd} rmi ${importTag}`, {
-          encoding: 'utf-8',
-          timeout: 10000,
-          stdio: ['pipe', 'pipe', 'pipe']
-        });
-      } catch {
-        // Ignore image removal errors
       }
     }
 
