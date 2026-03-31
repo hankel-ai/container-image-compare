@@ -9,6 +9,7 @@ on:
       - 'shared/**'
       - 'docker/**'
       - 'helm/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
