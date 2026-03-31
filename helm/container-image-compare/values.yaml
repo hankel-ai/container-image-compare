@@ -6,7 +6,7 @@ replicaCount: 1
 
 # Image configuration
 image:
-  repository: gtsrepo02.cslab.otxlab.net:8443/tools/container-image-compare
+  repository: ghcr.io/hankel-ai/container-image-compare
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion
   tag: latest
@@ -60,23 +60,21 @@ ingress:
   # Use cluster's default ingress class if not specified
   className: "nginx"
   annotations:
-    cert-manager.io/issuer: adcs-cluster-issuer
-    cert-manager.io/issuer-group: adcs.certmanager.csf.nokia.com
-    cert-manager.io/issuer-kind: ClusterAdcsIssuer
+    cert-manager.io/cluster-issuer: cluster-ca-issuer
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "6000"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "6000"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "6000"
     nginx.ingress.kubernetes.io/proxy-buffer-size: "32k"
   hosts:
-    - host: cic.cslab.otxlab.net
+    - host: cic.hankel.ai
       paths:
         - path: /
           pathType: Prefix
   tls: 
    - secretName: container-image-compare-tls
      hosts:
-       - cic.cslab.otxlab.net
+       - cic.hankel.ai
 
 # Resource limits and requests
 resources:
@@ -129,23 +127,23 @@ config:
   maxHistoryItems: 20
   
   # Skip TLS verification for self-signed certificates
-  skipTlsVerify: true
+  skipTlsVerify: false
   
   # Enable debug logging
   debugLogging: true
   
   # Comma-separated list of insecure registries (HTTP instead of HTTPS)
   # Example: "localhost:5000,my-registry.internal:5000"
-  insecureRegistries: "gtsrepo02.cslab.otxlab.net:8083"
+  insecureRegistries: ""
 
 # Proxy configuration
 proxy:
   # HTTP proxy URL (e.g., http://proxy.example.com:8080)
-  httpProxy: "http://f5exp-proxy.bp2.otxlab.net:3128"
+  httpProxy: ""
   # HTTPS proxy URL (usually same as httpProxy)
-  httpsProxy: "http://f5exp-proxy.bp2.otxlab.net:3128"
+  httpsProxy: ""
   # Comma-separated list of hosts to bypass proxy
-  noProxy: "localhost,127.0.0.1,.cluster.local,artifactory.otxlab.net,gtsrepo02.cslab.otxlab.net,gtsrepo01.cslab.otxlab.net"
+  noProxy: ""
 
 # Credential encryption key (base64 encoded 32-byte key)
 # Generate with: openssl rand -base64 32
