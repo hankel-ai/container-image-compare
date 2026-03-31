@@ -381,33 +381,126 @@ This creates:
 
 ## Deployment
 
-### Docker Deployment (Optional)
-
-Create a `Dockerfile`:
-
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-COPY backend/package*.json ./backend/
-COPY frontend/package*.json ./frontend/
-RUN npm run install-all
-COPY . .
-RUN npm run build
-EXPOSE 5000
-CMD ["npm", "start"]
-```
-
-Build and run:
+### Docker Compose (Local)
 
 ```bash
-docker build -t container-image-compare .
-docker run -p 5000:5000 -v ./cache:/app/cache container-image-compare
+docker compose -f docker/docker-compose.yml up -d --build
+# App available at http://localhost:5000
 ```
 
-### Standalone Executable (Future Enhancement)
+### Kubernetes (CI/CD with GitHub Actions)
 
-Consider using `pkg` or `nexe` to create standalone executables for distribution.
+Pushes to `main` automatically build a Docker image, push it to GHCR, and deploy to a K3s cluster via Helm. The pipeline uses GitHub-hosted runners for the build and a self-hosted ARC runner in the cluster for deployment.
+
+#### Cluster Prerequisites
+
+**1. Install Actions Runner Controller (ARC)**
+
+ARC is the official GitHub-supported way to run self-hosted GitHub Actions runners in Kubernetes.
+
+```bash
+helm install arc \
+  --namespace arc-systems \
+  --create-namespace \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+```
+
+Verify the controller is running:
+
+```bash
+kubectl get pods -n arc-systems
+# Expected: arc-gha-rs-controller-xxxxx  1/1  Running
+```
+
+**2. Create a GitHub PAT for runner registration**
+
+Create a fine-grained Personal Access Token at GitHub > Settings > Developer Settings > Fine-grained PATs:
+
+- **Resource owner**: `hankel-ai`
+- **Repository access**: Only `hankel-ai/container-image-compare`
+- **Permissions**: Administration (Read and write), Metadata (Read)
+
+Then create the K8s secret:
+
+```bash
+kubectl create namespace arc-runners
+kubectl create secret generic github-pat \
+  --namespace arc-runners \
+  --from-literal=github_token=<YOUR_PAT>
+```
+
+**3. Install the runner scale set**
+
+This registers an ephemeral runner that spins up when a workflow job targets `arc-runner-set`:
+
+```bash
+helm install arc-runner-set \
+  --namespace arc-runners \
+  oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --set githubConfigUrl="https://github.com/hankel-ai/container-image-compare" \
+  --set githubConfigSecret=github-pat \
+  --set minRunners=0 \
+  --set maxRunners=1
+```
+
+Verify the listener is running:
+
+```bash
+kubectl get pods -n arc-systems
+# Expected: arc-runner-set-xxxxx-listener  1/1  Running
+```
+
+**4. Grant RBAC permissions for Helm deployments**
+
+The runner's service account needs permissions to create and manage resources in the target namespace:
+
+```bash
+kubectl create clusterrolebinding arc-runner-admin \
+  --clusterrole=cluster-admin \
+  --serviceaccount=arc-runners:arc-runner-set-gha-rs-no-permission
+```
+
+> **Note**: This grants cluster-admin for simplicity. For production, create a scoped Role limited to the `container-image-compare` namespace.
+
+**5. Make the GHCR package public**
+
+After the first successful build pushes an image to GHCR, the package defaults to **private**. The cluster needs to pull without an `imagePullSecret`, so make it public:
+
+1. Go to https://github.com/hankel-ai?tab=packages
+2. Click `container-image-compare`
+3. Click **Package settings** (right sidebar)
+4. Scroll to **Danger Zone** > **Change package visibility**
+5. Select **Public** and confirm
+
+#### How the Pipeline Works
+
+```
+Push to main (frontend/backend/shared/docker/helm changes)
+  |
+  v
+Job 1: build (GitHub-hosted ubuntu-latest)
+  - Checks out code
+  - Logs into ghcr.io with GITHUB_TOKEN
+  - Builds multi-stage Docker image
+  - Pushes to ghcr.io/hankel-ai/container-image-compare:<sha> and :latest
+  |
+  v
+Job 2: deploy (self-hosted ARC runner in K3s)
+  - Checks out code (for Helm chart)
+  - Installs Helm
+  - Runs: helm upgrade --install with --set image.tag=<sha>
+  - Waits for rollout to complete
+```
+
+#### Manual Deployment
+
+To deploy manually from a local machine with Docker and Helm:
+
+```bash
+helm\redeploy.bat
+```
+
+This builds the image locally, pushes to GHCR, and runs `helm upgrade`. Requires `docker login ghcr.io -u hankel-ai` beforehand.
 
 ## Contributing
 
