@@ -60,7 +60,7 @@ ingress:
   # Use cluster's default ingress class if not specified
   className: "nginx"
   annotations:
-    cert-manager.io/cluster-issuer: cluster-ca-issuer
+    cert-manager.io/cluster-issuer: letsencrypt-hankel
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
     nginx.ingress.kubernetes.io/proxy-connect-timeout: "6000"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "6000"
