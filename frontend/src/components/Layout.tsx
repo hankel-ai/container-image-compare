@@ -1,12 +1,14 @@
-import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, IconButton } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
-import { Home, History, Settings } from '@mui/icons-material';
+import { Home, History, Settings, DarkMode, LightMode } from '@mui/icons-material';
+import { useThemeStore } from '../store/theme';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const { mode, toggle } = useThemeStore();
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <AppBar position="static">
@@ -41,6 +43,9 @@ export default function Layout({ children }: LayoutProps) {
           <Button color="inherit" component={RouterLink} to="/settings" startIcon={<Settings />}>
             Settings
           </Button>
+          <IconButton color="inherit" onClick={toggle} sx={{ ml: 1 }}>
+            {mode === 'dark' ? <LightMode /> : <DarkMode />}
+          </IconButton>
         </Toolbar>
       </AppBar>
       <Box component="main" sx={{ flexGrow: 1, p: 3, bgcolor: 'background.default' }}>
